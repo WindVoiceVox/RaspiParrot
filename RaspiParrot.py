@@ -9,13 +9,17 @@ import logging
 import configparser
 
 CONFIGFILE="config.ini"
-inifile=None
 
 def init():
+    '''
+    最初に1回だけ処理する部分
+    '''
+    # 設定ファイルの準備
     global inifile
     inifile = configparser.ConfigParser()
     inifile.read(CONFIGFILE)
 
+    # ログファイルの準備
     global logger
     logging.basicConfig(filename=inifile.get("log","filename"),
                         level=logging.INFO,
@@ -23,8 +27,11 @@ def init():
     logger = logging.getLogger("RaspiParrot")
 
 def GetAPI():
+    '''
+    Twitter APIを準備する部分
+    '''
     global inifile
-    logger.info("Twitter APIの使用を開始します。")
+    logger.info("Twitter APIの使用を要求")
     consumer_key    = inifile.get("keys", "TWEETUSERNAME")
     consumer_secret = inifile.get("keys", "TWEETPASSWORD")
     access_key      = inifile.get("keys", "TWEETACCESSKEY")
@@ -37,14 +44,15 @@ def GetAPI():
                        input_encoding=encoding)
 
 def OneCycle():
+    '''
+    定期的に、繰り返し処理する内容
+    '''
     global inifile
     logger.info(u"----- OneCycle開始 -----")
     LastMentionSeconds = int(inifile.get("records", "LastMentionSeconds"))
 
-    # Twitter APIを使える状態にする。有効時間60秒らしい。
     api = GetAPI()
 
-    # 自分自身に届いたMentionを確認する。最大20個らしい。
     try:
         MaxMentionSeconds = 0
         for state in api.GetMentions():
@@ -70,18 +78,25 @@ def OneCycle():
     logger.info(u"----- OneCycle終了 -----")
     
 def ReplyMention(api, state):
-    # Mentionが届いている。何か気の利いた返答をしよう。
+    '''
+    Mentionが届いている。何か気の利いた返答をしよう。
+    ToDo: ちっとも気が利いていないので何か考える
+    '''
     logger.info(u"Mention返しを開始")
     t = time.strftime(u"%Y-%m-%d %H:%M:%S", time.localtime())
     message = u"@%s メンションありがとう[%s]" % ( state.user.screen_name, t )
     newstates = api.PostUpdate(message, in_reply_to_status_id=state.id)
 
 def main():
+    '''
+    メインルーチン
+    '''
     init()
     while True:
         OneCycle()
         # Twitter API Rate Limitにより、15回/15分の制限がある
         time.sleep(180)
 
+# おまじない
 if __name__ == "__main__":
     main()
