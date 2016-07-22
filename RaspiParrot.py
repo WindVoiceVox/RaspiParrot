@@ -27,12 +27,15 @@ def init():
                         format='%(asctime)-15s %(levelname)s %(message)s')
     logger = logging.getLogger("RaspiParrot")
 
+    global trendticker
+    trendticker = int(inifile.get("trend","frequency"))
+
 def GetAPI():
     '''
     Twitter APIを準備する部分
     '''
     global inifile
-    logger.info("Twitter APIの使用を要求")
+    logger.info(u"Twitter APIの使用を要求")
     consumer_key    = inifile.get("keys", "TWEETUSERNAME")
     consumer_secret = inifile.get("keys", "TWEETPASSWORD")
     access_key      = inifile.get("keys", "TWEETACCESSKEY")
@@ -45,25 +48,43 @@ def GetAPI():
                        access_token_secret=access_secret,
                        input_encoding=encoding)
     except TwitterError as e:
-        logging.warning(u"twitter.Api error: %s" % ( e.message ))
+        logger.warning(u"twitter.Api error: %s" % ( e.message ))
     except Exception as e:
-        logging.warning(u"不明なエラー")
-
+        logger.warning(u"不明なエラー")
     return api
 
-def OneCycle():
+def PostTrendWord(api):
     '''
-    定期的に、繰り返し処理する内容
+    時々トレンドを入手してコメントする
     '''
-    global inifile
-    logger.info(u"----- OneCycle開始 -----")
+    global trendticker
+    try:
+        logger.debug(u"trendticker:%s" % ( trendticker ))
+        if trendticker != 0:
+            trendticker -= 1
+        else:
+            trendticker = int(inifile.get("trend","frequency"))
+            # woeid = 23424856は、日本のトレンドワード
+            trend = api.GetTrendsWoeid(woeid=23424856)
+            trendwords = u"現在のトレンドワード:"
+            for t in trend:
+                trendwords += " " + t.name 
+                # 長すぎるといけないので様子をみる
+                if len(trendwords) > 120:
+                    logger.info(u"Trendwords over 120 characters.")
+                    break
+                # トレンド関連のURL
+                logger.info(u"URL: %s" % ( t.url ))
+            # 結果をポストする
+            api.PostUpdate(trendwords)
+    except TwitterError as e:
+        logger.worning(u"PostTrendWord Error:%s" %( e.message ))
+
+def CheckMentions(api):
+    '''
+    メンションを確認して、適宜返答する
+    '''
     LastMentionSeconds = int(inifile.get("records", "LastMentionSeconds"))
-
-    api = GetAPI()
-    if api is None:
-        logger.info(u"----- OneCycle終了(異常終了) -----")
-        return
-
     try:
         MaxMentionSeconds = 0
         for state in api.GetMentions():
@@ -88,10 +109,8 @@ def OneCycle():
         logging.warning(u"Try explicitly specifying the encoding with the --encoding flag")
         sys.exit(2)
     except TwitterError as e:
-        logging.warning(u"GetMentions error:%s" % ( e.message ))
-        
-    logger.info(u"----- OneCycle終了 -----")
-    
+        logging.warning(u"CheckMentions error:%s" % ( e.message ))
+
 def ReplyMention(api, state):
     '''
     Mentionが届いている。何か気の利いた返答をしよう。
@@ -108,6 +127,26 @@ def ReplyMention(api, state):
         logging.warning(u"PostUpdate error:%s" % ( e.message ))
     return postcomplete
 
+def OneCycle():
+    '''
+    定期的に、繰り返し処理する内容
+    '''
+    global inifile
+    logger.info(u"----- OneCycle開始 -----")
+
+    api = GetAPI()
+    if api is None:
+        logger.info(u"----- OneCycle終了(異常終了) -----")
+        return
+
+    # トレンドワードを並べてツイートする
+    PostTrendWord(api)
+
+    # メンションを入手する
+    CheckMentions(api)
+    
+    logger.info(u"----- OneCycle終了 -----")
+    
 def main():
     '''
     メインルーチン
