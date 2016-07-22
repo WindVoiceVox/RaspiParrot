@@ -7,6 +7,7 @@ import twitter
 import time
 import logging
 import configparser
+from twitter import ( TwitterError )
 
 CONFIGFILE="config.ini"
 
@@ -37,11 +38,18 @@ def GetAPI():
     access_key      = inifile.get("keys", "TWEETACCESSKEY")
     access_secret   = inifile.get("keys", "TWEETACCESSSECRET")
     encoding        = 'utf-8'
-    return twitter.Api(consumer_key=consumer_key,
+    try:
+        api = twitter.Api(consumer_key=consumer_key,
                        consumer_secret=consumer_secret,
                        access_token_key=access_key,
                        access_token_secret=access_secret,
                        input_encoding=encoding)
+    except TwitterError as e:
+        logging.warning(u"twitter.Api error: %s" % ( e.message ))
+    except Exception as e:
+        logging.warning(u"不明なエラー")
+
+    return api
 
 def OneCycle():
     '''
@@ -52,6 +60,9 @@ def OneCycle():
     LastMentionSeconds = int(inifile.get("records", "LastMentionSeconds"))
 
     api = GetAPI()
+    if api is None:
+        logger.info(u"----- OneCycle終了(異常終了) -----")
+        return
 
     try:
         MaxMentionSeconds = 0
@@ -62,9 +73,10 @@ def OneCycle():
             if LastMentionSeconds < state.created_at_in_seconds:
                  logger.info(u"新しいMentionが到着:[%s] %s" % (t, state.user.screen_name) )
                  # このMentionは未処理なので応答を返す
-                 ReplyMention(api, state)
-                 if MaxMentionSeconds < state.created_at_in_seconds:
-                     MaxMentionSeconds = state.created_at_in_seconds
+                 if ReplyMention(api, state):
+                     # 応答を返し終わったらカウンタを更新
+                     if MaxMentionSeconds < state.created_at_in_seconds:
+                         MaxMentionSeconds = state.created_at_in_seconds
             else:
                  logger.info(u"返答済みのMention:[%s] %s" % (t, state.user.screen_name) )
         # メンション応答があった場合はLastMentionSecondsを更新
@@ -72,9 +84,12 @@ def OneCycle():
             inifile.set("records", "LastMentionSeconds", str(MaxMentionSeconds))
             inifile.write(open(CONFIGFILE, 'w'))
     except UnicodeDecodeError:
-        print("Your message could not be encoded.  Perhaps it contains non-ASCII characters? ")
-        print("Try explicitly specifying the encoding with the --encoding flag")
+        logging.warning(u"Your message could not be encoded.  Perhaps it contains non-ASCII characters? ")
+        logging.warning(u"Try explicitly specifying the encoding with the --encoding flag")
         sys.exit(2)
+    except TwitterError as e:
+        logging.warning(u"GetMentions error:%s" % ( e.message ))
+        
     logger.info(u"----- OneCycle終了 -----")
     
 def ReplyMention(api, state):
@@ -85,7 +100,13 @@ def ReplyMention(api, state):
     logger.info(u"Mention返しを開始")
     t = time.strftime(u"%Y-%m-%d %H:%M:%S", time.localtime())
     message = u"@%s メンションありがとう[%s]" % ( state.user.screen_name, t )
-    newstates = api.PostUpdate(message, in_reply_to_status_id=state.id)
+    postcomplete = False
+    try:
+        newstates = api.PostUpdate(message, in_reply_to_status_id=state.id)
+        postcomplete = True
+    except TwitterError as e:
+        logging.warning(u"PostUpdate error:%s" % ( e.message ))
+    return postcomplete
 
 def main():
     '''
